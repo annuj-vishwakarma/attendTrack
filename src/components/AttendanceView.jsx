@@ -38,7 +38,7 @@ export default function AttendanceView({ employees, records, session, saveRecord
     if (viewable.length > 0 && (!selEmp || !viewable.find(e => e.id === selEmp.id))) {
       setSelEmp(viewable[0]);
     }
-  }, [employees, session]);
+  }, [selEmp, viewable, employees, session]);
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 

@@ -146,7 +146,7 @@ export default function EmployeesView({ employees, users, session, addEmployee, 
                 {p.canManageEmp && (
                   <button className="btn-sm"
                     onClick={() => { setForm({ ...emp, username: empUser?.username || '', password: '' }); setFormErr(''); setModal(emp); }}
-                    style={{ background: "var(--color-primary)", background: "rgba(99,102,241,0.15)", color: "var(--color-primary-light)", flex: 1 }}>
+                    style={{ background: "var(--color-primary)", color: "var(--color-primary-light)", flex: 1 }}>
                     Edit
                   </button>
                 )}
