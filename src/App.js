@@ -147,6 +147,39 @@ export default function App() {
 
   // ── Attendance CRUD ───────────────────────────────────────────
   const saveRecord = async (empId, date, recordData) => {
+    // Determine if this is a late arrival based on late threshold time
+    let isLate = false;
+    if (recordData.status === 'present' && recordData.checkIn) {
+      try {
+        const workSettings = JSON.parse(localStorage.getItem('at-work-settings') || JSON.stringify({startTime:'10:00 AM',endTime:'6:30 PM',lateThresholdTime:'11:00 AM',workDays:[1,2,3,4,5]}));
+        const timeStringTo24Hour = (timeStr) => {
+          if (!timeStr) return null;
+          const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+          if (!match) return null;
+          let [_, h, m, period] = match;
+          h = parseInt(h);
+          m = parseInt(m);
+          if (period.toUpperCase() === 'PM' && h !== 12) h += 12;
+          if (period.toUpperCase() === 'AM' && h === 12) h = 0;
+          return h + m / 60;
+        };
+        const checkInStringTo24Hour = (checkInStr) => {
+          if (!checkInStr) return null;
+          const match = checkInStr.match(/^(\d{1,2}):(\d{2})$/);
+          if (!match) return null;
+          const [_, h, m] = match;
+          return parseInt(h) + parseInt(m) / 60;
+        };
+        const lateThresholdDecimal = timeStringTo24Hour(workSettings.lateThresholdTime);
+        const checkInDecimal = checkInStringTo24Hour(recordData.checkIn);
+        if (lateThresholdDecimal && checkInDecimal && checkInDecimal > lateThresholdDecimal) {
+          isLate = true;
+        }
+      } catch (e) {
+        console.error('Error calculating late arrival:', e);
+      }
+    }
+    
     await dbUpsert('attendance', {
       emp_id:       empId,
       date,
@@ -156,8 +189,9 @@ export default function App() {
       leave_type:   recordData.leaveType    || null,
       holiday_name: recordData.holidayName  || null,
       note:         recordData.note         || null,
+      is_late:      isLate,
     }, 'emp_id,date');
-    setRecords(prev => ({ ...prev, [`${empId}::${date}`]: recordData }));
+    setRecords(prev => ({ ...prev, [`${empId}::${date}`]: { ...recordData, isLate } }));
   };
 
   const deleteRecord = async (empId, date) => {

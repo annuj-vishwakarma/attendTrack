@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { DAYS, MONTHS, STATUS } from '../lib/constants';
-import { dk, daysInMonth, isWeekend, formatTime, getPerms } from '../lib/helpers';
+import { dk, daysInMonth, isWeekend, formatTime, getPerms, calculateLateArrivalScore, calculateConsistencyScore, calculateWeeklyPunctualityScore, calculateAttendanceRating, getWorkSettings, countLateArrivals } from '../lib/helpers';
 import { PageHeader, Toast, StatusBadge } from './ui';
 import { useState } from 'react';
 
@@ -20,7 +20,6 @@ export default function ReportsView({ employees, records, session }) {
   const prevMonth = () => { if (month === 0) { setYear(y => y - 1); setMonth(11); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 11) { setYear(y => y + 1); setMonth(0); } else setMonth(m => m + 1); };
 
-  // Build rows + stats for a single employee + month
   function buildRows(emp, y, m) {
     const d = daysInMonth(y, m);
     const rows = [];
@@ -45,6 +44,63 @@ export default function ReportsView({ employees, records, session }) {
       });
     }
     return { rows, sts };
+  }
+
+  function calculateMonthlyScores(emp, y, m) {
+    const workSettings = getWorkSettings();
+    const d = daysInMonth(y, m);
+    const sts = { present: 0, absent: 0, wfh: 0, leave: 0, holiday: 0, weekend: 0 };
+    const lateArrivals = [];
+    const weeklyScores = [];
+    
+    // Calculate daily stats and track late arrivals
+    for (let i = 1; i <= d; i++) {
+      const ds = dk(y, m, i);
+      const rec = records[`${emp.id}::${ds}`];
+      const s = rec?.status || (isWeekend(ds) ? 'weekend' : null) || 'absent';
+      if (sts[s] !== undefined) sts[s]++;
+      
+      if (rec?.status === 'present' && rec?.checkIn) {
+        lateArrivals.push(calculateLateArrivalScore(rec.checkIn, workSettings));
+      }
+    }
+    
+    // Calculate weekly punctuality scores
+    for (let week = 0; week < 5; week++) {
+      const weekDays = [];
+      for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
+        const dayOfMonth = week * 7 + dayOfWeek + 1;
+        if (dayOfMonth <= d) {
+          weekDays.push(dk(y, m, dayOfMonth));
+        }
+      }
+      if (weekDays.length > 0) {
+        let lateInWeek = 0;
+        let presentInWeek = 0;
+        weekDays.forEach(ds => {
+          const rec = records[`${emp.id}::${ds}`];
+          if (rec?.status === 'present' && rec?.checkIn) {
+            presentInWeek++;
+            const score = calculateLateArrivalScore(rec.checkIn, workSettings);
+            if (score < 100) lateInWeek++;
+          }
+        });
+        const wscore = presentInWeek === 0 ? 100 : Math.round(((presentInWeek - lateInWeek) / presentInWeek) * 100);
+        weeklyScores.push(wscore);
+      }
+    }
+    
+    // Calculate final scores
+    const lateArrivalScore = lateArrivals.length > 0 
+      ? Math.round(lateArrivals.reduce((a, b) => a + b, 0) / lateArrivals.length)
+      : 100;
+    const consistencyScore = calculateConsistencyScore(sts);
+    const weeklyPunctualityScore = weeklyScores.length > 0 
+      ? Math.round(weeklyScores.reduce((a, b) => a + b, 0) / weeklyScores.length)
+      : 100;
+    const ratingInfo = calculateAttendanceRating(lateArrivalScore, consistencyScore, weeklyPunctualityScore);
+    
+    return { lateArrivalScore, consistencyScore, weeklyPunctualityScore, ratingInfo };
   }
 
   function exportExcel() {
@@ -167,6 +223,54 @@ export default function ReportsView({ employees, records, session }) {
               </div>
             ))}
           </div>
+
+          {(() => {
+            const scores = calculateMonthlyScores(myEmp, year, month);
+            return (
+              <div className="score-cards" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12, marginBottom: 18 }}>
+                <div style={{ background: "var(--color-bg-secondary)", borderRadius: 12, padding: "16px", border: "1px solid var(--color-border-lighter)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-tertiary)", textTransform: "uppercase", marginBottom: 8 }}>Late Arrival Score</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: scores.lateArrivalScore >= 80 ? "#10b981" : scores.lateArrivalScore >= 60 ? "#f59e0b" : "#ef4444" }}>
+                    {scores.lateArrivalScore}%
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 4 }}>
+                    {scores.lateArrivalScore >= 90 ? "Always on time" : scores.lateArrivalScore >= 70 ? "Generally punctual" : "Needs improvement"}
+                  </div>
+                </div>
+
+                <div style={{ background: "var(--color-bg-secondary)", borderRadius: 12, padding: "16px", border: "1px solid var(--color-border-lighter)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-tertiary)", textTransform: "uppercase", marginBottom: 8 }}>Consistency Score</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: scores.consistencyScore >= 80 ? "#10b981" : scores.consistencyScore >= 60 ? "#f59e0b" : "#ef4444" }}>
+                    {scores.consistencyScore}%
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 4 }}>
+                    {scores.consistencyScore >= 90 ? "Excellent attendance" : scores.consistencyScore >= 70 ? "Good attendance" : "Requires attention"}
+                  </div>
+                </div>
+
+                <div style={{ background: "var(--color-bg-secondary)", borderRadius: 12, padding: "16px", border: "1px solid var(--color-border-lighter)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-tertiary)", textTransform: "uppercase", marginBottom: 8 }}>Weekly Punctuality Score</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: scores.weeklyPunctualityScore >= 80 ? "#10b981" : scores.weeklyPunctualityScore >= 60 ? "#f59e0b" : "#ef4444" }}>
+                    {scores.weeklyPunctualityScore}%
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 4 }}>
+                    Week average punctuality
+                  </div>
+                </div>
+
+                <div style={{ background: "var(--color-bg-secondary)", borderRadius: 12, padding: "16px", border: `2px solid ${scores.ratingInfo.color}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-tertiary)", textTransform: "uppercase", marginBottom: 8 }}>Performance Rating</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: scores.ratingInfo.color }}>
+                    {scores.ratingInfo.emoji}
+                  </div>
+                  <div style={{ fontSize: 12, color: scores.ratingInfo.color, marginTop: 4, fontWeight: 600 }}>
+                    {scores.ratingInfo.rating}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="table-scroll" style={{ background: "var(--color-bg-secondary)", borderRadius: 12, border: "1px solid var(--color-border-lighter)", overflow: "hidden" }}>
             <table className="report-table" style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
@@ -208,24 +312,48 @@ export default function ReportsView({ employees, records, session }) {
                     {v.icon}<br />{v.label}
                   </th>
                 ))}
+                <th style={{ padding: "10px 7px", textAlign: "center", fontSize: 9, color: "#d97706", fontWeight: 700, textTransform: "uppercase" }}>⏰ Late Count</th>
+                <th style={{ padding: "10px 7px", textAlign: "center", fontSize: 9, color: "#10b981", fontWeight: 700, textTransform: "uppercase" }}>Late Arrival %</th>
+                <th style={{ padding: "10px 7px", textAlign: "center", fontSize: 9, color: "#3b82f6", fontWeight: 700, textTransform: "uppercase" }}>Consistency</th>
+                <th style={{ padding: "10px 7px", textAlign: "center", fontSize: 9, color: "#8b5cf6", fontWeight: 700, textTransform: "uppercase" }}>Punctuality</th>
+                <th style={{ padding: "10px 7px", textAlign: "center", fontSize: 9, color: "#f59e0b", fontWeight: 700, textTransform: "uppercase" }}>Rating</th>
               </tr>
             </thead>
             <tbody>
-              {empStats.map(({ emp, sts }) => (
-                <tr key={emp.id} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                  <td style={{ padding: "10px 14px" }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{emp.name}</div>
-                    <div style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{emp.department}</div>
-                  </td>
-                  {Object.entries(STATUS).map(([k, v]) => (
-                    <td key={k} style={{ padding: "10px 7px", textAlign: "center", fontSize: 13, fontWeight: 700, color: sts[k] > 0 ? v.color : "var(--color-text-muted)" }}>
-                      {sts[k] || '—'}
+              {empStats.map(({ emp, sts }) => {
+                const scores = calculateMonthlyScores(emp, year, month);
+                const lateCount = countLateArrivals(emp, year, month, records);
+                return (
+                  <tr key={emp.id} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                    <td style={{ padding: "10px 14px" }}>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{emp.name}</div>
+                      <div style={{ fontSize: 10, color: "var(--color-text-muted)" }}>{emp.department}</div>
                     </td>
-                  ))}
-                </tr>
-              ))}
+                    {Object.entries(STATUS).map(([k, v]) => (
+                      <td key={k} style={{ padding: "10px 7px", textAlign: "center", fontSize: 13, fontWeight: 700, color: sts[k] > 0 ? v.color : "var(--color-text-muted)" }}>
+                        {sts[k] || '—'}
+                      </td>
+                    ))}
+                    <td style={{ padding: "10px 7px", textAlign: "center", fontSize: 13, fontWeight: 700, color: lateCount > 5 ? "#ef4444" : lateCount > 2 ? "#f59e0b" : "#10b981" }}>
+                      ⏰ {lateCount}
+                    </td>
+                    <td style={{ padding: "10px 7px", textAlign: "center", fontSize: 12, fontWeight: 700, color: scores.lateArrivalScore >= 80 ? "#10b981" : scores.lateArrivalScore >= 60 ? "#f59e0b" : "#ef4444" }}>
+                      {scores.lateArrivalScore}%
+                    </td>
+                    <td style={{ padding: "10px 7px", textAlign: "center", fontSize: 12, fontWeight: 700, color: scores.consistencyScore >= 80 ? "#10b981" : scores.consistencyScore >= 60 ? "#f59e0b" : "#ef4444" }}>
+                      {scores.consistencyScore}%
+                    </td>
+                    <td style={{ padding: "10px 7px", textAlign: "center", fontSize: 12, fontWeight: 700, color: scores.weeklyPunctualityScore >= 80 ? "#10b981" : scores.weeklyPunctualityScore >= 60 ? "#f59e0b" : "#ef4444" }}>
+                      {scores.weeklyPunctualityScore}%
+                    </td>
+                    <td style={{ padding: "10px 7px", textAlign: "center", fontSize: 12, fontWeight: 700 }}>
+                      <span style={{ color: scores.ratingInfo.color }}>{scores.ratingInfo.emoji}</span> <span style={{ color: "var(--color-text-secondary)", fontSize: 11 }}>{scores.ratingInfo.rating}</span>
+                    </td>
+                  </tr>
+                );
+              })}
               {emps.length === 0 && (
-                <tr><td colSpan={8} style={{ padding: "40px", textAlign: "center", color: "var(--color-text-muted)" }}>No employees</td></tr>
+                <tr><td colSpan={13} style={{ padding: "40px", textAlign: "center", color: "var(--color-text-muted)" }}>No employees</td></tr>
               )}
             </tbody>
           </table>

@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS attendance (
   leave_type   TEXT,
   holiday_name TEXT,
   note         TEXT,
+  is_late      BOOLEAN DEFAULT FALSE,
   created_at   TIMESTAMPTZ DEFAULT NOW(),
   updated_at   TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (emp_id, date)

@@ -1,5 +1,5 @@
 import { DAYS, MONTHS, STATUS } from '../lib/constants';
-import { dk, daysInMonth, isWeekend, todayStr, getPerms } from '../lib/helpers';
+import { dk, daysInMonth, isWeekend, todayStr, getPerms, countLateArrivals } from '../lib/helpers';
 import { Avatar, StatusBadge } from './ui';
 
 export default function Dashboard({ employees, records, session }) {
@@ -13,19 +13,29 @@ export default function Dashboard({ employees, records, session }) {
     : employees.filter(e => e.id === session?.user?.empId);
 
   // Today counts
-  const td = { present: 0, absent: 0, wfh: 0, leave: 0, holiday: 0, weekend: 0, unmarked: 0 };
+  const td = { present: 0, absent: 0, wfh: 0, leave: 0, holiday: 0, weekend: 0, unmarked: 0, late: 0 };
   emps.forEach(e => {
     const s = records[`${e.id}::${ts}`]?.status || (isWeekend(ts) ? 'weekend' : null);
     s ? td[s]++ : td.unmarked++;
+    // Count late arrivals today
+    if (records[`${e.id}::${ts}`]?.isLate) {
+      td.late++;
+    }
   });
 
   // Month summary
   const d = daysInMonth(y, m);
   const ms = { present: 0, absent: 0, wfh: 0, leave: 0, holiday: 0 };
+  let monthlyLateCount = 0;
+  
   emps.forEach(e => {
     for (let i = 1; i <= d; i++) {
       const s = records[`${e.id}::${dk(y, m, i)}`]?.status || (isWeekend(dk(y, m, i)) ? 'weekend' : null);
       if (s && ms[s] !== undefined) ms[s]++;
+      // Count monthly late arrivals
+      if (records[`${e.id}::${dk(y, m, i)}`]?.isLate) {
+        monthlyLateCount++;
+      }
     }
   });
 
@@ -35,7 +45,7 @@ export default function Dashboard({ employees, records, session }) {
     { l: "WFH", v: td.wfh, c: "#3b82f6", i: "⌂" },
     { l: "On Leave", v: td.leave, c: "#f59e0b", i: "◉" },
     { l: "Absent", v: td.absent, c: "#ef4444", i: "✗" },
-    { l: "Unmarked", v: td.unmarked, c: "#64748b", i: "?" },
+    { l: "Late Today", v: td.late, c: "#d97706", i: "⏰" },
   ];
 
   return (
@@ -107,6 +117,15 @@ export default function Dashboard({ employees, records, session }) {
               </div>
             );
           })}
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--color-border-light)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+              <span style={{ fontSize: 12, color: "var(--color-text-secondary)", fontWeight: 600 }}>⏰ Late Arrivals</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#d97706" }}>{monthlyLateCount}</span>
+            </div>
+            <div style={{ height: 5, borderRadius: 3, background: "var(--color-border-light)" }}>
+              <div style={{ height: "100%", borderRadius: 3, width: `${Math.min(monthlyLateCount * 5, 100)}%`, background: "#d97706" }} />
+            </div>
+          </div>
         </div>
 
       </div>
