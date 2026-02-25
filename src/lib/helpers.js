@@ -200,6 +200,7 @@ export const rowsToRecords = (rows) => {
       leaveType:   r.leave_type   || "",
       holidayName: r.holiday_name || "",
       note:        r.note         || "",
+      isLate:      r.is_late      || false,
     };
   });
   return map;
